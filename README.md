@@ -12,5 +12,5 @@ Sistem, kullanıcı tarafından verilen görüntüleri analiz ederek görüntü 
 ## Proje Ekibi
 - Zeynep Cemre KELEŞ
 - Melike KAYA
-  Nazar DEMİR
+- Nazar DEMİR
 
