@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.venv/
+yolo26n.pt
+bus.jpg
+__pycache__/
+runs/
