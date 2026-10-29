@@ -1,4 +1,4 @@
-# Byte-compiled / optimized / DLL files
+﻿# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class
@@ -222,3 +222,8 @@ __marimo__/
 # Model dosyalari
 *.onnx
 models/
+.venv/
+yolo26n.pt
+bus.jpg
+__pycache__/
+runs/
