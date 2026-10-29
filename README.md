@@ -165,6 +165,29 @@ Her test geçici bir veritabanı kullanır, gerçek `data/project.db` etkilenmez
 - geçmişin sırası, sayıları ve filtreleri,
 - analiz silinince sonuçların da silinmesi.
 - 
+## Yüz Tanıma Modülü
+
+**Durum:** Yöntem araştırması ve yüz tespiti denemesi tamamlandı. Modül dosyası (`src/core/face_recognition.py`) henüz yazılmadı, planlanan çalışma devam ediyor.
+
+### Yöntem
+- Yüz tespiti: OpenCV YuNet (ONNX)
+- Yüz tanıma: OpenCV SFace (planlanan)
+- Ayrıntılı gerekçe: [docs/face_method.md](docs/face_method.md)
+
+### Model dosyası
+Model dosyaları depoya eklenmez. `models/` klasörüne elle indirilir:
+
+```powershell
+mkdir models
+curl.exe -L -o models\face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+```
+
+### Önemli bulgu
+YuNet çok büyük görsellerde (örn. 2048 px) güven skorunu düşürüyor. Bu yüzden görselin uzun kenarı yaklaşık 640 piksele küçültülüp tespit yapılacak, kutular orijinal boyuta geri ölçeklenecek.
+
+### Veri güvenliği
+Yalnızca izni alınmış kişilerin görselleri kullanılır. Test fotoğrafları ve biyometrik veriler depoya eklenmez.
+
 ## Proje Ekibi
 - Zeynep Cemre KELEŞ
 - Melike KAYA
