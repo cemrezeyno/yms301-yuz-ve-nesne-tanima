@@ -1,2 +1,4 @@
-ultralytics
+streamlit>=1.40
+pillow>=10.0
 pytest>=8.0
+
