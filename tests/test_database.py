@@ -4,8 +4,10 @@
 Her test geçici bir veritabanı kullanır; gerçek data/project.db etkilenmez.
 """
 
+import sqlite3
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from src.data import database as db
@@ -91,6 +93,142 @@ def test_delete_person_sets_face_result_to_unknown(db_path: Path) -> None:
     assert details is not None
     assert details["faces"][0]["person_id"] is None
     assert details["faces"][0]["person_name"] == "Bilinmeyen kişi"
+
+
+# ---------------------------- Yüz embedding -------------------------------
+
+def _embedding(seed: int = 0, size: int = 128) -> np.ndarray:
+    return np.random.default_rng(seed).random(size, dtype=np.float32)
+
+
+def test_add_person_with_embedding_roundtrip(db_path: Path) -> None:
+    embedding = _embedding()
+    person_id = db.add_person("Ayşe", face_embedding=embedding,
+                              db_path=db_path)
+    stored = db.get_face_embedding(person_id, db_path=db_path)
+    assert stored is not None
+    assert stored.dtype == np.float32
+    np.testing.assert_array_equal(stored, embedding)
+
+
+def test_embedding_accepts_list_and_2d_row(db_path: Path) -> None:
+    first = db.add_person("A", face_embedding=[0.1, 0.2, 0.3],
+                          db_path=db_path)
+    second = db.add_person("B", face_embedding=np.ones((1, 3)),
+                           db_path=db_path)
+    assert db.get_face_embedding(first, db_path=db_path).shape == (3,)
+    assert db.get_face_embedding(second, db_path=db_path).shape == (3,)
+
+
+def test_person_without_embedding(db_path: Path) -> None:
+    person_id = db.add_person("Ali", db_path=db_path)
+    assert db.get_face_embedding(person_id, db_path=db_path) is None
+    person = db.get_person(person_id, db_path=db_path)
+    assert person is not None and person["has_face_embedding"] == 0
+
+
+def test_person_queries_do_not_return_raw_embedding(db_path: Path) -> None:
+    person_id = db.add_person("Ayşe", face_embedding=_embedding(),
+                              db_path=db_path)
+    person = db.get_person(person_id, db_path=db_path)
+    listed = db.list_persons(db_path=db_path)[0]
+    for record in (person, listed):
+        assert record is not None
+        assert "face_embedding" not in record
+        assert record["has_face_embedding"] == 1
+
+
+def test_set_and_clear_embedding(db_path: Path) -> None:
+    person_id = db.add_person("Ali", db_path=db_path)
+    assert db.set_face_embedding(person_id, _embedding(1), db_path=db_path)
+    np.testing.assert_array_equal(
+        db.get_face_embedding(person_id, db_path=db_path), _embedding(1))
+
+    # Aynı kişinin embedding'i güncellenebilir
+    assert db.set_face_embedding(person_id, _embedding(2), db_path=db_path)
+    np.testing.assert_array_equal(
+        db.get_face_embedding(person_id, db_path=db_path), _embedding(2))
+
+    assert db.clear_face_embedding(person_id, db_path=db_path)
+    assert db.get_face_embedding(person_id, db_path=db_path) is None
+    assert db.get_person(person_id, db_path=db_path) is not None
+
+
+def test_embedding_functions_on_missing_person(db_path: Path) -> None:
+    assert not db.set_face_embedding(999, _embedding(), db_path=db_path)
+    assert not db.clear_face_embedding(999, db_path=db_path)
+    assert db.get_face_embedding(999, db_path=db_path) is None
+
+
+@pytest.mark.parametrize("bad", [
+    [],                         # boş
+    [[1.0, 2.0], [3.0, 4.0]],   # iki boyutlu
+    [1.0, float("nan")],        # NaN
+    [1.0, float("inf")],        # sonsuz
+    ["a", "b"],                 # sayı değil
+])
+def test_invalid_embedding_rejected(db_path: Path, bad) -> None:
+    with pytest.raises(ValueError):
+        db.add_person("X", face_embedding=bad, db_path=db_path)
+    assert db.list_persons(only_active=False, db_path=db_path) == []
+
+
+def test_embedding_size_must_match_existing(db_path: Path) -> None:
+    db.add_person("A", face_embedding=_embedding(size=128), db_path=db_path)
+    other = db.add_person("B", db_path=db_path)
+    with pytest.raises(ValueError, match="boyut"):
+        db.set_face_embedding(other, _embedding(size=512), db_path=db_path)
+    with pytest.raises(ValueError, match="boyut"):
+        db.add_person("C", face_embedding=_embedding(size=512),
+                      db_path=db_path)
+
+
+def test_single_person_can_change_embedding_size(db_path: Path) -> None:
+    """Tek kayıtlı embedding kendi kişisinde farklı boyutla değişebilir."""
+    person_id = db.add_person("A", face_embedding=_embedding(size=128),
+                              db_path=db_path)
+    assert db.set_face_embedding(person_id, _embedding(size=512),
+                                 db_path=db_path)
+
+
+def test_known_embeddings_only_active_with_embedding(db_path: Path) -> None:
+    ayse = db.add_person("Ayşe", face_embedding=_embedding(1),
+                         db_path=db_path)
+    ali = db.add_person("Ali", face_embedding=_embedding(2), db_path=db_path)
+    db.add_person("Embedding'siz", db_path=db_path)
+    db.set_person_active(ali, False, db_path=db_path)
+
+    known = db.get_known_face_embeddings(db_path=db_path)
+    assert [k["person_id"] for k in known] == [ayse]
+    assert known[0]["name"] == "Ayşe"
+    np.testing.assert_array_equal(known[0]["embedding"], _embedding(1))
+
+
+def test_delete_person_removes_embedding(db_path: Path) -> None:
+    person_id = db.add_person("Ayşe", face_embedding=_embedding(),
+                              db_path=db_path)
+    db.delete_person(person_id, db_path=db_path)
+    assert db.get_known_face_embeddings(db_path=db_path) == []
+
+
+def test_initialize_adds_column_to_week2_database(tmp_path: Path) -> None:
+    """face_embedding sütunu olmayan eski veritabanı veri kaybetmeden
+    güncellenir."""
+    old_db = tmp_path / "week2.db"
+    connection = sqlite3.connect(old_db)
+    connection.executescript(
+        db.SCHEMA_SQL.replace(",\n    face_embedding BLOB", "")
+    )
+    connection.execute("INSERT INTO persons (name) VALUES ('Eski Kayıt')")
+    connection.commit()
+    connection.close()
+
+    db.initialize_database(old_db)
+
+    persons = db.list_persons(db_path=old_db)
+    assert [p["name"] for p in persons] == ["Eski Kayıt"]
+    assert db.set_face_embedding(persons[0]["person_id"], _embedding(),
+                                 db_path=old_db)
 
 
 # ---------------------------- Analiz kaydı --------------------------------

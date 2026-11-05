@@ -12,9 +12,22 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+import numpy as np
+import numpy.typing as npt
+
 logger = logging.getLogger(__name__)
 
 DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "project.db"
+
+# Yüz embedding'leri küçük-endian float32 olarak BLOB içinde saklanır.
+EMBEDDING_DTYPE = np.dtype("<f4")
+
+# persons tablosundan okunurken ham embedding yerine yalnızca
+# embedding olup olmadığı döndürülür (biyometrik veri gereksiz yere taşınmaz).
+PERSON_COLUMNS = (
+    "person_id, name, created_at, is_active, "
+    "face_embedding IS NOT NULL AS has_face_embedding"
+)
 
 AnalysisType = Literal["face", "object", "both"]
 VALID_ANALYSIS_TYPES: frozenset[str] = frozenset({"face", "object", "both"})
@@ -57,7 +70,8 @@ CREATE TABLE IF NOT EXISTS persons (
     name TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_active INTEGER NOT NULL DEFAULT 1
-        CHECK (is_active IN (0, 1))
+        CHECK (is_active IN (0, 1)),
+    face_embedding BLOB
 );
 
 CREATE TABLE IF NOT EXISTS analyses (
@@ -167,6 +181,19 @@ def initialize_database(db_path: Path = DATABASE_PATH) -> None:
                 "Dosyayı silip uygulamayı yeniden çalıştırın."
             )
         connection.executescript(SCHEMA_SQL)
+
+        # 2. hafta veritabanlarında face_embedding sütunu yok; veri
+        # kaybetmeden sütunu ekle.
+        person_columns = {
+            row["name"] for row in connection.execute(
+                "PRAGMA table_info(persons)"
+            )
+        }
+        if "face_embedding" not in person_columns:
+            connection.execute(
+                "ALTER TABLE persons ADD COLUMN face_embedding BLOB"
+            )
+            logger.info("persons tablosuna face_embedding sütunu eklendi")
     logger.info("Veritabanı hazır: %s", db_path)
 
 
@@ -220,19 +247,86 @@ def _box_values(box: BoxCoordinates) -> tuple[int, int, int, int]:
     return x1, y1, x2, y2
 
 
+def _embedding_to_blob(embedding: npt.ArrayLike) -> bytes:
+    """Embedding'i doğrular ve veritabanına yazılacak baytlara çevirir.
+
+    Tek boyutlu, boş olmayan ve yalnızca sonlu sayılardan oluşan bir dizi
+    bekler. (1, N) şeklindeki diziler (N,) olarak kabul edilir.
+    """
+    try:
+        array = np.squeeze(np.asarray(embedding, dtype=EMBEDDING_DTYPE))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Embedding sayılardan oluşmalı.") from error
+    if array.ndim != 1 or array.size == 0:
+        raise ValueError(
+            f"Embedding tek boyutlu ve boş olmayan bir dizi olmalı, "
+            f"gelen şekil: {array.shape}"
+        )
+    if not np.all(np.isfinite(array)):
+        raise ValueError("Embedding NaN veya sonsuz değer içeremez.")
+    return array.tobytes()
+
+
+def _blob_to_embedding(blob: bytes) -> npt.NDArray[np.float32]:
+    """Veritabanındaki baytları numpy dizisine çevirir."""
+    return np.frombuffer(blob, dtype=EMBEDDING_DTYPE).astype(np.float32)
+
+
+def _check_embedding_size(
+    connection: sqlite3.Connection,
+    blob: bytes,
+    exclude_person_id: int | None = None,
+) -> None:
+    """Yeni embedding'in boyutu kayıtlı olanlarla aynı mı kontrol eder.
+
+    Farklı boyut, farklı bir modelle üretildiğini gösterir; bu tür
+    embedding'ler birbiriyle karşılaştırılamaz.
+    """
+    row = connection.execute(
+        """
+        SELECT length(face_embedding) AS size FROM persons
+        WHERE face_embedding IS NOT NULL AND person_id IS NOT ?
+        LIMIT 1
+        """,
+        (exclude_person_id,),
+    ).fetchone()
+    if row is not None and row["size"] != len(blob):
+        expected = row["size"] // EMBEDDING_DTYPE.itemsize
+        given = len(blob) // EMBEDDING_DTYPE.itemsize
+        raise ValueError(
+            f"Embedding boyutu {given}, kayıtlı embedding'ler {expected} "
+            "boyutlu. Aynı yüz modelinin kullanıldığından emin olun."
+        )
+
+
 # --------------------------------------------------------------------------
 # Kişi işlemleri
 # --------------------------------------------------------------------------
 
-def add_person(name: str, db_path: Path = DATABASE_PATH) -> int:
-    """Yeni bir kişi ekler ve person_id değerini döndürür."""
+def add_person(
+    name: str,
+    face_embedding: npt.ArrayLike | None = None,
+    db_path: Path = DATABASE_PATH,
+) -> int:
+    """Yeni bir kişi ekler ve person_id değerini döndürür.
+
+    face_embedding verilirse kişiyle birlikte kaydedilir; daha sonra
+    set_face_embedding() ile de eklenebilir.
+    """
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("Kişi adı boş olamaz.")
+    blob = (
+        _embedding_to_blob(face_embedding)
+        if face_embedding is not None else None
+    )
 
     with get_connection(db_path) as connection:
+        if blob is not None:
+            _check_embedding_size(connection, blob)
         cursor = connection.execute(
-            "INSERT INTO persons (name) VALUES (?)", (clean_name,)
+            "INSERT INTO persons (name, face_embedding) VALUES (?, ?)",
+            (clean_name, blob),
         )
         person_id = _last_id(cursor)
     logger.info("Kişi eklendi: %s (id=%d)", clean_name, person_id)
@@ -245,7 +339,8 @@ def get_person(
     """Kişiyi döndürür; bulunamazsa None."""
     with get_connection(db_path) as connection:
         row = connection.execute(
-            "SELECT * FROM persons WHERE person_id = ?", (person_id,)
+            f"SELECT {PERSON_COLUMNS} FROM persons WHERE person_id = ?",
+            (person_id,),
         ).fetchone()
     return dict(row) if row else None
 
@@ -253,8 +348,8 @@ def get_person(
 def list_persons(
     only_active: bool = True, db_path: Path = DATABASE_PATH
 ) -> list[dict[str, Any]]:
-    """Kişileri ada göre sıralı listeler."""
-    query = "SELECT * FROM persons"
+    """Kişileri ada göre sıralı listeler (embedding'in kendisi dönmez)."""
+    query = f"SELECT {PERSON_COLUMNS} FROM persons"
     if only_active:
         query += " WHERE is_active = 1"
     query += " ORDER BY name"
@@ -285,6 +380,87 @@ def delete_person(person_id: int, db_path: Path = DATABASE_PATH) -> bool:
             "DELETE FROM persons WHERE person_id = ?", (person_id,)
         )
     return cursor.rowcount > 0
+
+
+# --------------------------------------------------------------------------
+# Yüz embedding işlemleri
+# --------------------------------------------------------------------------
+
+def set_face_embedding(
+    person_id: int,
+    face_embedding: npt.ArrayLike,
+    db_path: Path = DATABASE_PATH,
+) -> bool:
+    """Kişinin yüz embedding'ini kaydeder veya günceller.
+
+    Kişi bulunduysa True döner.
+    """
+    blob = _embedding_to_blob(face_embedding)
+    with get_connection(db_path) as connection:
+        _check_embedding_size(connection, blob, exclude_person_id=person_id)
+        cursor = connection.execute(
+            "UPDATE persons SET face_embedding = ? WHERE person_id = ?",
+            (blob, person_id),
+        )
+    if cursor.rowcount:
+        logger.info("Yüz embedding'i kaydedildi (person_id=%d)", person_id)
+    return cursor.rowcount > 0
+
+
+def get_face_embedding(
+    person_id: int, db_path: Path = DATABASE_PATH
+) -> npt.NDArray[np.float32] | None:
+    """Kişinin embedding'ini döndürür; kişi veya embedding yoksa None."""
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT face_embedding FROM persons WHERE person_id = ?",
+            (person_id,),
+        ).fetchone()
+    if row is None or row["face_embedding"] is None:
+        return None
+    return _blob_to_embedding(row["face_embedding"])
+
+
+def clear_face_embedding(
+    person_id: int, db_path: Path = DATABASE_PATH
+) -> bool:
+    """Kişinin embedding'ini siler, kişi kaydını korur.
+
+    Kişi bulunduysa True döner.
+    """
+    with get_connection(db_path) as connection:
+        cursor = connection.execute(
+            "UPDATE persons SET face_embedding = NULL WHERE person_id = ?",
+            (person_id,),
+        )
+    if cursor.rowcount:
+        logger.info("Yüz embedding'i silindi (person_id=%d)", person_id)
+    return cursor.rowcount > 0
+
+
+def get_known_face_embeddings(
+    db_path: Path = DATABASE_PATH,
+) -> list[dict[str, Any]]:
+    """Eşleştirme için aktif ve embedding'i olan kişileri döndürür.
+
+    Her eleman: {"person_id": int, "name": str, "embedding": np.ndarray}
+    """
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT person_id, name, face_embedding FROM persons
+            WHERE is_active = 1 AND face_embedding IS NOT NULL
+            ORDER BY person_id
+            """
+        ).fetchall()
+    return [
+        {
+            "person_id": row["person_id"],
+            "name": row["name"],
+            "embedding": _blob_to_embedding(row["face_embedding"]),
+        }
+        for row in rows
+    ]
 
 
 # --------------------------------------------------------------------------
