@@ -39,29 +39,37 @@ YOLO model dosyası yolo26n.pt, modülün beklediği şekilde proje ana klasör�
 
 Proje ana klasöründe aşağıdaki komutla nesne tespiti fonksiyonu çalıştırılabilir:
 
-python -c "from src.core.object_detection import detect_objects; print(detect_objects('bus.jpg'))"
+python -c "from src.core.object_detection import detect_objects; print(detect_objects('tests/assets/bus.jpg'))"
 
-bus.jpg yerine analiz edilecek görüntünün dosya yolu kullanılabilir.
+Görsel yolu yerine analiz edilecek herhangi bir görüntünün yolu kullanılabilir. İsteğe bağlı `min_confidence` parametresi (varsayılan 0.25) bu değerin altındaki tespitleri eler:
 
-Fonksiyon, her tespit için label, confidence ve box alanlarını içeren bir liste döndürür. Belirtilen görüntü bulunamazsa FileNotFoundError hatası oluşturur.
+detect_objects('tests/assets/bus.jpg', min_confidence=0.5)
+
+Fonksiyon, her tespit için label, confidence ve box alanlarını içeren bir liste döndürür.
+
+Hata durumları:
+
+- Görsel ya da model dosyası bulunamazsa `FileNotFoundError` oluşur.
+- Dosya geçerli bir görsel değilse (bozuk veya farklı türde dosya) `ValueError` oluşur.
+- `min_confidence` 0 ile 1 arasında değilse `ValueError` oluşur.
 
 ## Testler
 
-Otomatik testleri çalıştırmak için önce test aracını kurun:
-
-python -m pip install pytest
-
-Ardından:
+Test araçları requirements.txt ile birlikte kurulur. Testleri çalıştırmak için:
 
 python -m pytest tests/test_object_detection.py -v
 
-YOLO modülü için iki otomatik test uygulanmıştır:
+Testler depodaki `tests/assets/bus.jpg` görselini kullanır. Model dosyası (yolo26n.pt) proje ana klasöründe yoksa, modele ihtiyaç duyan testler hata vermek yerine atlanır (skipped).
 
-Geçerli bir görüntüden nesne tespit sonuçlarının döndürülmesi.
+YOLO modülü için uygulanan testler:
 
-Görüntü bulunamadığında uygun hatanın oluşturulması.
-
-Son test çalıştırmasında iki test de başarılı olmuştur.
+- Geçerli bir görüntüden doğru biçimde sonuç döndürülmesi
+- Test görselinde otobüs ve insan bulunması
+- Kutu koordinatlarının geçerli olması (x1 < x2, y1 < y2, negatif değer yok)
+- Güven eşiği yükseltildiğinde sonuçların filtrelenmesi
+- Görüntü bulunamadığında FileNotFoundError oluşması
+- Geçersiz güven eşiğinde ValueError oluşması
+- Bozuk / görsel olmayan dosyada ValueError oluşması
 
 ## Veritabanı Katmanı
 

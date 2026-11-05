@@ -220,6 +220,7 @@ __marimo__/
 .streamlit/secrets.toml
 .venv/
 yolo26n.pt
-bus.jpg
+# Kök klasördeki deneme görseli (tests/assets/bus.jpg depoda kalmalı)
+/bus.jpg
 __pycache__/
 runs/
