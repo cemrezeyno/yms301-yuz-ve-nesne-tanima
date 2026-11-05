@@ -218,9 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-.venv/
+
+# Proje veritabanı (kişi verisi içerir, repoya eklenmemeli)
+data/*.db
+
+# YOLO model dosyası, örnek görsel ve çıktı klasörü
 yolo26n.pt
 # Kök klasördeki deneme görseli (tests/assets/bus.jpg depoda kalmalı)
 /bus.jpg
 __pycache__/
+runs/
+bus.jpg
 runs/

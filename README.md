@@ -104,20 +104,20 @@ erDiagram
         int analysis_id FK
         int person_id FK "NULL = Bilinmeyen kişi"
         real confidence
-        int x
-        int y
-        int width
-        int height
+        int x1
+        int y1
+        int x2
+        int y2
     }
     object_results {
         int object_result_id PK
         int analysis_id FK
-        text object_name
+        text label
         real confidence
-        int x
-        int y
-        int width
-        int height
+        int x1
+        int y1
+        int x2
+        int y2
     }
 ```
 
@@ -126,13 +126,31 @@ erDiagram
 | `persons` | İzinli kayıtlı kişiler: ad, kayıt tarihi, aktif/pasif durumu |
 | `analyses` | Her analiz: görsel adı, analiz türü, durum ve varsa hata mesajı |
 | `face_results` | Bulunan yüzler: kutu konumu, güven skoru, eşleşen kişi |
-| `object_results` | Bulunan nesneler: sınıf adı, güven skoru, kutu konumu |
+| `object_results` | Bulunan nesneler: etiket (`label`), güven skoru, kutu konumu |
+
+### Kutu koordinatları
+
+Yüz ve nesne kutuları, YOLO modülüyle aynı şekilde `x1, y1, x2, y2` olarak saklanır:
+`(x1, y1)` kutunun sol üst köşesi, `(x2, y2)` sağ alt köşesidir. Değerler piksel cinsindendir.
+
+`save_analysis()` sonuçları şu formatta bekler; kutu liste veya sözlük olarak verilebilir:
+
+```python
+# Nesne sonucu (detect_objects() çıktısıyla aynı alanlar)
+{"label": "bus", "confidence": 0.91, "box": [22, 231, 805, 756]}
+
+# Yüz sonucu (person_id None ise "Bilinmeyen kişi")
+{"person_id": 3, "confidence": 0.87, "box": {"x1": 10, "y1": 20, "x2": 60, "y2": 80}}
+```
+
+Ondalıklı koordinatlar kayıt sırasında tam sayıya yuvarlanır.
 
 ### Veri kuralları
 
 - Bir analiz silinince ona ait tüm yüz ve nesne sonuçları da silinir (`ON DELETE CASCADE`).
 - Bir kişi silinince eski yüz sonuçları korunur ve "Bilinmeyen kişi" olarak görünür (`ON DELETE SET NULL`).
-- Güven skorları 0 ile 1 arasında olmalıdır. Kutu değerleri negatif olamaz.
+- Güven skorları 0 ile 1 arasında olmalıdır.
+- Kutu koordinatları negatif olamaz; `x2 ≥ x1` ve `y2 ≥ y1` olmalıdır.
 - Analiz türü yalnızca `face`, `object` veya `both` olabilir.
 - Bir analiz ve tüm sonuçları tek işlemde (transaction) kaydedilir. Sonuçlardan biri hatalıysa hiçbiri kaydedilmez.
 - Kayıt zamanları (`created_at`) UTC olarak tutulur.
@@ -163,18 +181,19 @@ pytest tests/test_database.py -v
 ```
 
 Her test geçici bir veritabanı kullanır, gerçek `data/project.db` etkilenmez.
-23 test şunları kontrol eder:
+30 test şunları kontrol eder:
 
 - tabloların oluşması ve yabancı anahtarların açık olması,
 - kişi ekleme, listeleme, pasif yapma ve silme,
 - yüz ve nesne sonuçlarıyla analiz kaydı,
-- hatalı girdilerin reddedilmesi (geçersiz tür, skor, kutu),
+- kutunun liste veya sözlük olarak verilebilmesi ve ondalıklı değerlerin yuvarlanması,
+- hatalı girdilerin reddedilmesi (geçersiz tür, skor, etiket, kutu),
 - hatalı kayıtta tüm işlemin geri alınması,
+- eski tablo yapısındaki veritabanının fark edilmesi,
 - geçmişin sırası, sayıları ve filtreleri,
 - analiz silinince sonuçların da silinmesi.
-- 
+
 ## Proje Ekibi
 - Zeynep Cemre KELEŞ
 - Melike KAYA
 - Nazar DEMİR
-

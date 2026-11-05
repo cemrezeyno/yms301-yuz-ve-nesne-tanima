@@ -1,2 +1,2 @@
 ultralytics
-pytest
+pytest>=8.0
