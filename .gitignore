@@ -227,3 +227,5 @@ yolo26n.pt
 bus.jpg
 __pycache__/
 runs/
+# Proje veritabanı (kişi verisi içerir, repoya eklenmemeli)
+data/*.db

@@ -1,1 +1,2 @@
-ultralytics
+﻿ultralytics
+pytest>=8.0
