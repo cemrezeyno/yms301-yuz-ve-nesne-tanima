@@ -62,3 +62,17 @@ def test_draw_faces_does_not_modify_original(blank_image):
     drawn = fr.draw_faces(blank_image, [result])
     assert np.array_equal(blank_image, original)
     assert not np.array_equal(drawn, original)
+
+
+def test_box_xyxy_converts_from_xywh():
+    result = fr.FaceResult(box=(10, 20, 30, 40), name=fr.UNKNOWN_NAME, confidence=0.9)
+    assert result.box_xyxy() == (10, 20, 40, 60)
+
+
+def test_to_dict_matches_database_format():
+    result = fr.FaceResult(box=(10, 20, 30, 40), name=fr.UNKNOWN_NAME, confidence=0.9)
+    assert result.to_dict() == {
+        "person_id": None,
+        "confidence": 0.9,
+        "box": [10, 20, 40, 60],
+    }

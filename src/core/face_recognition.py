@@ -31,6 +31,20 @@ class FaceResult:
     box: tuple[int, int, int, int]
     name: str
     confidence: float
+    person_id: int | None = None
+
+    def box_xyxy(self) -> tuple[int, int, int, int]:
+        """Kutuyu (x1, y1, x2, y2) köşe biçiminde döndürür."""
+        x, y, w, h = self.box
+        return x, y, x + w, y + h
+
+    def to_dict(self) -> dict:
+        """database.save_analysis'in beklediği yüz sözlüğünü üretir."""
+        return {
+            "person_id": self.person_id,
+            "confidence": self.confidence,
+            "box": list(self.box_xyxy()),
+        }
 
 
 def get_detector() -> cv2.FaceDetectorYN:
@@ -50,7 +64,6 @@ def get_detector() -> cv2.FaceDetectorYN:
         logger.info("Yüz tespit modeli yüklendi: %s", MODEL_PATH.name)
 
     return _detector
-
 
 
 def load_image(image_path: str | Path) -> np.ndarray:
