@@ -198,23 +198,44 @@ Her test geçici bir veritabanı kullanır, gerçek `data/project.db` etkilenmez
 - 
 ## Yüz Tanıma Modülü
 
-**Durum:** Yöntem araştırması ve yüz tespiti denemesi tamamlandı. Modül dosyası (`src/core/face_recognition.py`) henüz yazılmadı, planlanan çalışma devam ediyor.
+**Durum:** Yüz tespiti tamamlandı ve veritabanı formatıyla uyumlu. Kişi eşleştirme (SFace) iskeleti hazır, embedding çıkarma ve veritabanına bağlama devam ediyor.
 
 ### Yöntem
-- Yüz tespiti: OpenCV YuNet (ONNX)
-- Yüz tanıma: OpenCV SFace (planlanan)
+- Yüz tespiti: OpenCV YuNet (ONNX), `src/core/face_recognition.py`
+- Kişi eşleştirme: OpenCV SFace (ONNX) ve kosinüs benzerliği, `src/core/face_matching.py`
 - Ayrıntılı gerekçe: [docs/face_method.md](docs/face_method.md)
 
-### Model dosyası
+### Model dosyaları
 Model dosyaları depoya eklenmez. `models/` klasörüne elle indirilir:
 
 ```powershell
 mkdir models
 curl.exe -L -o models\face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+curl.exe -L -o models\face_recognition_sface_2021dec.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx
 ```
 
+### Kullanım
+```python
+from src.core.face_recognition import analyze
+
+results = analyze("gorsel.jpg")   # dosya yolu veya OpenCV (BGR) numpy dizisi
+for face in results:
+    print(face.box, face.name, face.confidence)
+    print(face.to_dict())  # {"person_id": None, "confidence": ..., "box": [x1, y1, x2, y2]}
+```
+
+- `FaceResult.box` biçimi `(x, y, genişlik, yükseklik)`, `to_dict()` ise veritabanının beklediği `[x1, y1, x2, y2]` biçimini üretir.
+- Şimdilik `name` hep "Bilinmeyen kişi", `person_id` `None`.
+- Dosya yoksa `FileNotFoundError`, geçersiz uzantı veya bozuk görselde `ValueError` oluşur.
+
+### Testler
+```powershell
+python -m pytest tests/test_face_recognition.py tests/test_face_matching.py -v
+```
+Testler `models/` içindeki ONNX dosyalarına ihtiyaç duyar. Tüm testler Python 3.14.6 ile çalıştırılmıştır. Python 3.15'te bazı paketlerin hazır sürümü olmadığı için 3.14 önerilir.
+
 ### Önemli bulgu
-YuNet çok büyük görsellerde (örn. 2048 px) güven skorunu düşürüyor. Bu yüzden görselin uzun kenarı yaklaşık 640 piksele küçültülüp tespit yapılacak, kutular orijinal boyuta geri ölçeklenecek.
+YuNet çok büyük görsellerde (örn. 2048 px) güven skorunu düşürüyor. Bu yüzden görselin uzun kenarı yaklaşık 640 piksele küçültülüp tespit yapılıyor, kutular orijinal boyuta geri ölçekleniyor.
 
 ### Veri güvenliği
 Yalnızca izni alınmış kişilerin görselleri kullanılır. Test fotoğrafları ve biyometrik veriler depoya eklenmez.
