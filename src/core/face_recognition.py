@@ -26,12 +26,17 @@ _detector: cv2.FaceDetectorYN | None = None
 
 @dataclass(frozen=True)
 class FaceResult:
-    """Tek bir yüzün sonucu. box: (x, y, genişlik, yükseklik)."""
+    """Tek bir yüzün sonucu.
+
+    box: (x, y, genişlik, yükseklik).
+    landmarks: 5 yüz noktası (x1, y1, ..., x5, y5), orijinal görsele göre.
+    """
 
     box: tuple[int, int, int, int]
     name: str
     confidence: float
     person_id: int | None = None
+    landmarks: tuple[float, ...] | None = None
 
     def box_xyxy(self) -> tuple[int, int, int, int]:
         """Kutuyu (x1, y1, x2, y2) köşe biçiminde döndürür."""
@@ -110,9 +115,10 @@ def detect_faces(image: np.ndarray) -> list[FaceResult]:
         x, y, w, h = (face[:4] / scale).astype(int)
         x, y = max(int(x), 0), max(int(y), 0)
         w, h = min(int(w), width - x), min(int(h), height - y)
+        landmarks = tuple(float(v) for v in face[4:14] / scale)
         results.append(
             FaceResult(box=(x, y, w, h), name=UNKNOWN_NAME,
-                       confidence=float(face[-1]))
+                       confidence=float(face[-1]), landmarks=landmarks)
         )
 
     logger.info("%d yüz bulundu.", len(results))

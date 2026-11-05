@@ -48,3 +48,53 @@ def test_find_best_match_with_no_known_people():
 
 def test_recognizer_is_loaded_once():
     assert fm.get_recognizer() is fm.get_recognizer()
+
+import pytest
+
+from src.core.face_recognition import FaceResult
+
+
+def test_extract_embedding_requires_landmarks():
+    face = FaceResult(box=(0, 0, 10, 10), name="x", confidence=0.9)
+    image = np.zeros((50, 50, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        fm.extract_embedding(image, face)
+
+
+def test_identify_faces_without_known_people_returns_faces(monkeypatch):
+    face = FaceResult(box=(0, 0, 10, 10), name="Bilinmeyen kişi", confidence=0.9)
+    monkeypatch.setattr(fm, "detect_faces", lambda image: [face])
+    result = fm.identify_faces(np.zeros((50, 50, 3), dtype=np.uint8), [])
+    assert result == [face]
+
+
+def test_identify_faces_matches_known_person(monkeypatch):
+    face = FaceResult(
+        box=(0, 0, 10, 10), name="Bilinmeyen kişi", confidence=0.9,
+        landmarks=tuple(float(i) for i in range(10)),
+    )
+    vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    monkeypatch.setattr(fm, "detect_faces", lambda image: [face])
+    monkeypatch.setattr(fm, "extract_embedding", lambda image, f: vec)
+    people = [{"person_id": 7, "name": "Ayşe", "embedding": vec}]
+    result = fm.identify_faces(np.zeros((50, 50, 3), dtype=np.uint8), people)
+    assert result[0].person_id == 7
+    assert result[0].name == "Ayşe"
+
+
+def test_identify_faces_unknown_when_below_threshold(monkeypatch):
+    face = FaceResult(
+        box=(0, 0, 10, 10), name="Bilinmeyen kişi", confidence=0.9,
+        landmarks=tuple(float(i) for i in range(10)),
+    )
+    monkeypatch.setattr(fm, "detect_faces", lambda image: [face])
+    monkeypatch.setattr(
+        fm, "extract_embedding",
+        lambda image, f: np.array([0.0, 1.0], dtype=np.float32),
+    )
+    people = [{"person_id": 1, "name": "Ali",
+               "embedding": np.array([1.0, 0.0], dtype=np.float32)}]
+    result = fm.identify_faces(np.zeros((50, 50, 3), dtype=np.uint8), people)
+    assert result[0].person_id is None
+    assert result[0].name == "Bilinmeyen kişi"
+
