@@ -1,0 +1,4 @@
+[server]
+# Yüklenebilecek en büyük dosya (MB). src/web/app.py içindeki
+# MAX_FILE_SIZE_MB ile aynı tutulmalı.
+maxUploadSize = 10
