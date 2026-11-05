@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 
-from src.core.face_recognition import UNKNOWN_NAME, FaceResult, detect_faces
+from src.core.face_recognition import FaceResult, detect_faces
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +73,46 @@ def find_best_match(
     if best_id is None or best_score < threshold:
         return None, max(best_score, 0.0)
     return best_id, best_score
+
+
+def extract_embedding(image: np.ndarray, face: FaceResult) -> np.ndarray:
+    """Yüzü hizalayıp 128 boyutlu SFace embedding'ini çıkarır."""
+    if face.landmarks is None or len(face.landmarks) != 10:
+        raise ValueError("Embedding için 5 yüz noktası (landmarks) gerekli.")
+
+    row = np.array(
+        [*face.box, *face.landmarks, face.confidence], dtype=np.float32
+    )
+    recognizer = get_recognizer()
+    aligned = recognizer.alignCrop(image, row)
+    return recognizer.feature(aligned).reshape(-1)
+
+
+def identify_faces(
+    image: np.ndarray,
+    known_people: list[dict[str, Any]],
+    threshold: float = COSINE_THRESHOLD,
+) -> list[FaceResult]:
+    """Yüzleri bulur ve kayıtlı kişilerle eşleştirir.
+
+    known_people: database.get_known_face_embeddings() çıktısı
+    ({"person_id", "name", "embedding"} sözlükleri).
+    """
+    names = {p["person_id"]: p["name"] for p in known_people}
+    known = {p["person_id"]: p["embedding"] for p in known_people}
+
+    results: list[FaceResult] = []
+    for face in detect_faces(image):
+        if not known:
+            results.append(face)
+            continue
+        embedding = extract_embedding(image, face)
+        person_id, score = find_best_match(embedding, known, threshold)
+        if person_id is None:
+            results.append(face)
+        else:
+            logger.info("Eşleşme: person_id=%d (benzerlik %.2f)", person_id, score)
+            results.append(
+                replace(face, name=names[person_id], person_id=person_id)
+            )
+    return results

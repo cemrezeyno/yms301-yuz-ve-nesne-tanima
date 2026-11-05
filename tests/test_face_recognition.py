@@ -76,3 +76,10 @@ def test_to_dict_matches_database_format():
         "confidence": 0.9,
         "box": [10, 20, 40, 60],
     }
+
+def test_to_dict_ignores_landmarks():
+    result = fr.FaceResult(
+        box=(10, 20, 30, 40), name=fr.UNKNOWN_NAME, confidence=0.9,
+        landmarks=tuple(float(i) for i in range(10)),
+    )
+    assert set(result.to_dict()) == {"person_id", "confidence", "box"}
