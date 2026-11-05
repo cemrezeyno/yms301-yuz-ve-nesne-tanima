@@ -18,8 +18,10 @@ def db_path(tmp_path: Path) -> Path:
     return path
 
 
-def _box(x: int = 10, y: int = 20, width: int = 30, height: int = 40):
-    return {"x": x, "y": y, "width": width, "height": height}
+def _box(x1: float = 10, y1: float = 20, x2: float = 40,
+         y2: float = 60) -> list[float]:
+    """Nesne modülünün döndürdüğü [x1, y1, x2, y2] formatında kutu."""
+    return [x1, y1, x2, y2]
 
 
 # ---------------------------- Kurulum -------------------------------------
@@ -99,12 +101,13 @@ def test_save_analysis_with_results(db_path: Path) -> None:
         "sinif.jpg", "both",
         face_results=[
             {"person_id": person_id, "confidence": 0.87, "box": _box()},
-            {"person_id": None, "confidence": None, "box": _box(50)},
+            {"person_id": None, "confidence": None,
+             "box": _box(50, 20, 90, 60)},
         ],
         object_results=[
-            {"object_name": "chair", "confidence": 0.6, "box": _box()},
-            {"object_name": "laptop", "confidence": 0.95,
-             "box": _box(1.6, 2.4, 3.5, 4)},  # float koordinatlar
+            {"label": "chair", "confidence": 0.6, "box": _box()},
+            {"label": "laptop", "confidence": 0.95,
+             "box": _box(1.6, 2.4, 300.5, 400)},  # ondalıklı değerler
         ],
         db_path=db_path,
     )
@@ -115,9 +118,11 @@ def test_save_analysis_with_results(db_path: Path) -> None:
     assert [f["person_name"] for f in details["faces"]] == [
         "Ayşe", "Bilinmeyen kişi"]
     # Nesneler güven skoruna göre azalan sırada gelir
-    assert [o["object_name"] for o in details["objects"]] == [
+    assert [o["label"] for o in details["objects"]] == [
         "laptop", "chair"]
-    assert details["objects"][0]["x"] == 2
+    laptop = details["objects"][0]
+    assert (laptop["x1"], laptop["y1"], laptop["x2"], laptop["y2"]) == (
+        2, 2, 300, 400)
 
 
 def test_save_analysis_without_results(db_path: Path) -> None:
@@ -143,7 +148,7 @@ def test_save_analysis_rejects_bad_confidence(
     with pytest.raises(ValueError):
         db.save_analysis(
             "a.jpg", "object",
-            object_results=[{"object_name": "cup",
+            object_results=[{"label": "cup",
                              "confidence": confidence, "box": _box()}],
             db_path=db_path,
         )
@@ -153,8 +158,8 @@ def test_save_analysis_rejects_negative_box(db_path: Path) -> None:
     with pytest.raises(ValueError):
         db.save_analysis(
             "a.jpg", "object",
-            object_results=[{"object_name": "cup", "confidence": 0.5,
-                             "box": _box(x=-5)}],
+            object_results=[{"label": "cup", "confidence": 0.5,
+                             "box": _box(x1=-5)}],
             db_path=db_path,
         )
 
@@ -163,8 +168,8 @@ def test_save_analysis_rejects_missing_box_key(db_path: Path) -> None:
     with pytest.raises(ValueError):
         db.save_analysis(
             "a.jpg", "object",
-            object_results=[{"object_name": "cup", "confidence": 0.5,
-                             "box": {"x": 1, "y": 2}}],
+            object_results=[{"label": "cup", "confidence": 0.5,
+                             "box": [1, 2, 3]}],
             db_path=db_path,
         )
 
@@ -179,6 +184,58 @@ def test_unknown_person_id_rolls_back_everything(db_path: Path) -> None:
             db_path=db_path,
         )
     assert db.get_analysis_history(db_path=db_path) == []
+
+
+def test_box_accepts_dict_and_tuple(db_path: Path) -> None:
+    analysis_id = db.save_analysis(
+        "a.jpg", "object",
+        object_results=[
+            {"label": "cup", "confidence": 0.5,
+             "box": {"x1": 1, "y1": 2, "x2": 3, "y2": 4}},
+            {"label": "pen", "confidence": 0.4, "box": (5, 6, 7, 8)},
+        ],
+        db_path=db_path,
+    )
+    details = db.get_analysis_details(analysis_id, db_path=db_path)
+    assert details is not None
+    boxes = [(o["x1"], o["y1"], o["x2"], o["y2"])
+             for o in details["objects"]]
+    assert boxes == [(1, 2, 3, 4), (5, 6, 7, 8)]
+
+
+@pytest.mark.parametrize("box", [
+    [50, 20, 10, 60],   # x2 < x1
+    [10, 60, 40, 20],   # y2 < y1
+    "10,20,40,60",      # metin
+    {"x": 1, "y": 2, "width": 3, "height": 4},  # eski format
+])
+def test_save_analysis_rejects_invalid_box(db_path: Path, box) -> None:
+    with pytest.raises(ValueError):
+        db.save_analysis(
+            "a.jpg", "object",
+            object_results=[{"label": "cup", "confidence": 0.5,
+                             "box": box}],
+            db_path=db_path,
+        )
+
+
+def test_save_analysis_rejects_empty_label(db_path: Path) -> None:
+    with pytest.raises(ValueError):
+        db.save_analysis(
+            "a.jpg", "object",
+            object_results=[{"label": "  ", "confidence": 0.5,
+                             "box": _box()}],
+            db_path=db_path,
+        )
+
+
+def test_initialize_rejects_old_schema(tmp_path: Path) -> None:
+    old_db = tmp_path / "old.db"
+    with db.get_connection(old_db) as connection:
+        connection.execute(
+            "CREATE TABLE object_results (x INTEGER, y INTEGER)")
+    with pytest.raises(db.DatabaseError, match="eski"):
+        db.initialize_database(old_db)
 
 
 def test_save_failed_analysis(db_path: Path) -> None:
@@ -196,7 +253,7 @@ def test_save_failed_analysis(db_path: Path) -> None:
 def test_history_order_counts_and_filter(db_path: Path) -> None:
     first = db.save_analysis(
         "1.jpg", "object",
-        object_results=[{"object_name": "cup", "confidence": 0.5,
+        object_results=[{"label": "cup", "confidence": 0.5,
                          "box": _box()}],
         db_path=db_path,
     )
@@ -231,7 +288,7 @@ def test_get_missing_analysis_returns_none(db_path: Path) -> None:
 def test_delete_analysis_cascades(db_path: Path) -> None:
     analysis_id = db.save_analysis(
         "a.jpg", "object",
-        object_results=[{"object_name": "cup", "confidence": 0.5,
+        object_results=[{"label": "cup", "confidence": 0.5,
                          "box": _box()}],
         db_path=db_path,
     )

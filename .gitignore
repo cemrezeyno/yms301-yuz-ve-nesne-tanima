@@ -221,3 +221,8 @@ __marimo__/
 
 # Proje veritabanı (kişi verisi içerir, repoya eklenmemeli)
 data/*.db
+
+# YOLO model dosyası, örnek görsel ve çıktı klasörü
+yolo26n.pt
+bus.jpg
+runs/

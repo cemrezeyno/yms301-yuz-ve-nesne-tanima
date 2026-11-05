@@ -1,120 +1,75 @@
-# Yüz ve Nesne Tanıma Sistemi
+# yms301-yuz-ve-nesne-tanima
+Bu proje, Python ve görüntü işleme teknikleri kullanılarak geliştirilen bir yüz ve nesne tanıma sistemidir.
 
-Python ile görüntü işleme tabanlı yüz ve nesne tanıma sistemi.
-YMS301 dersi kapsamında 3 kişilik ekip tarafından geliştirilmektedir.
+## Proje Hakkında
+Sistem, kullanıcı tarafından verilen görüntüleri analiz ederek görüntü içerisindeki yüzleri ve belirlenen nesneleri tespit etmeyi ve tanımayı amaçlamaktadır. Proje kapsamında görüntü işleme, yüz tanıma ve nesne tespiti yöntemleri kullanılacaktır.
 
-Kullanıcı web arayüzünden bir görsel yükler ve analiz türünü seçer. Sistem:
+## Kullanılacak Teknolojiler
+- Python
+- OpenCV
+- Görüntü işleme
 
-- görseldeki **yüzleri** bulur ve izinli kayıtlı kişilerle karşılaştırarak
-  kişiyi veya **"Bilinmeyen kişi"** sonucunu verir,
-- görseldeki **nesneleri** YOLO modeliyle tespit eder ve güven skorlarını verir,
-- sonuçları görsel üzerinde kutularla işaretler ve **analiz geçmişine** kaydeder.
+## YOLO Nesne Tespiti Modülü
 
----
+Proje kapsamında geliştirilen YOLO modülü, verilen görüntülerdeki nesneleri tespit eder ve her tespit için aşağıdaki bilgileri döndürür:
 
-## İçindekiler
+Nesne etiketi: Tespit edilen nesnenin sınıfı.
 
-- [Teknolojiler](#teknolojiler)
-- [Ekip ve görev dağılımı](#ekip-ve-görev-dağılımı)
-- [Mimari](#mimari)
-- [Klasör yapısı](#klasör-yapısı)
-- [Veritabanı](#veritabanı)
-- [Modüller arası veri formatı](#modüller-arası-veri-formatı)
-- [Kurulum](#kurulum)
-- [Çalıştırma](#çalıştırma)
-- [Testler](#testler)
-- [Ekran görüntüleri](#ekran-görüntüleri)
-- [Gizlilik ve etik](#gizlilik-ve-etik)
-- [Proje takvimi](#proje-takvimi)
+Güven skoru: Modelin tespit sonucuna ilişkin güven değeri.
 
----
+Koordinatlar: Tespit edilen nesnenin sınırlayıcı kutusunun x1, y1, x2, y2 koordinatları.
 
-## Teknolojiler
+Modül dosyası:
 
-| Alan | Araç |
-|---|---|
-| Dil | Python 3.10+ |
-| Web arayüzü | Streamlit |
-| Görüntü işleme | OpenCV |
-| Nesne tespiti | YOLO |
-| Veritabanı | SQLite |
-| Test | pytest |
-| Sürüm kontrolü | Git ve GitHub |
+src/core/object_detection.py
 
----
+## Kurulum
 
-## Ekip ve görev dağılımı
+Projeyi bilgisayarınıza indirdikten sonra proje ana klasöründe bir Python sanal ortamı oluşturun ve etkinleştirin.
 
-| Üye | Sorumluluk | Temel dosyalar |
-|---|---|---|
-| 1. kişi — *Ad Soyad* | Yüz tespiti ve kimlik eşleştirme | `src/core/face_recognition.py`, `tests/test_face_recognition.py` |
-| 2. kişi — *Ad Soyad* | YOLO ile nesne tespiti | `src/core/object_detection.py`, `tests/test_object_detection.py` |
-| 3. kişi — *Ad Soyad* | Veritabanı ve web uygulaması | `src/data/database.py`, `src/web/app.py`, `tests/test_database.py` |
+Windows PowerShell:
 
-Modüllerin girdi/çıktı formatları, web entegrasyonu, kod incelemeleri ve uçtan uca testler
-ekipçe ortak yürütülür.
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 
----
+YOLO model dosyası yolo26n.pt, modülün beklediği şekilde proje ana klasöründe bulunmalıdır. Model dosyası GitHub deposuna eklenmez; ilk kurulumda ayrıca edinilmesi gerekir.
 
-## Mimari
+## Kullanım
 
-Her bileşen ayrı bir modüldür. Bileşenler birbirine yalnızca tanımlı fonksiyonlar
-üzerinden bağlanır. `main.py` yalnızca uygulamayı başlatır; iş mantığı içermez.
+Proje ana klasöründe aşağıdaki komutla nesne tespiti fonksiyonu çalıştırılabilir:
 
-```mermaid
-flowchart LR
-    U([Kullanıcı]) -->|görsel yükler| W[Web arayüzü<br/>src/web/app.py]
-    W -->|görsel| F[Yüz modülü<br/>src/core/face_recognition.py]
-    W -->|görsel| O[Nesne modülü<br/>src/core/object_detection.py]
-    F -->|yüz sonuçları| W
-    O -->|nesne sonuçları| W
-    W -->|kaydet / sorgula| D[Veritabanı katmanı<br/>src/data/database.py]
-    D <--> DB[(SQLite<br/>data/project.db)]
-    F -.->|kayıtlı kişiler| D
-```
+python -c "from src.core.object_detection import detect_objects; print(detect_objects('bus.jpg'))"
 
-**Analiz akışı**
+bus.jpg yerine analiz edilecek görüntünün dosya yolu kullanılabilir.
 
-1. Kullanıcı görseli yükler ve analiz türünü seçer: `face`, `object` veya `both`.
-2. Web arayüzü görseli ilgili modüle veya modüllere gönderir.
-3. Modüller sonuçları [ortak veri formatında](#modüller-arası-veri-formatı) döndürür.
-4. Web arayüzü kutuları görsel üzerinde gösterir ve `save_analysis()` ile sonuçları kaydeder.
-5. Hata olursa (bozuk görsel, model hatası vb.) `save_failed_analysis()` ile hata kaydedilir.
-6. Geçmiş ekranı `get_analysis_history()` ve `get_analysis_details()` ile doldurulur.
+Fonksiyon, her tespit için label, confidence ve box alanlarını içeren bir liste döndürür. Belirtilen görüntü bulunamazsa FileNotFoundError hatası oluşturur.
 
-Modeller uygulama başlarken **bir kez** yüklenir ve her analizde yeniden kullanılır.
+## Testler
 
----
+Otomatik testleri çalıştırmak için önce test aracını kurun:
 
-## Klasör yapısı
+python -m pip install pytest
 
-```
-yms301-yuz-ve-nesne-tanima/
-├── main.py                       # Giriş noktası (yalnızca yönlendirme)
-├── requirements.txt              # Gerekli Python paketleri
-├── pytest.ini                    # Test ayarları
-├── src/
-│   ├── core/
-│   │   ├── face_recognition.py   # Yüz tespiti ve kişi eşleştirme
-│   │   └── object_detection.py   # YOLO ile nesne tespiti
-│   ├── data/
-│   │   └── database.py           # SQLite veritabanı katmanı
-│   └── web/
-│       └── app.py                # Streamlit arayüzü
-├── tests/
-│   ├── test_database.py
-│   ├── test_face_recognition.py
-│   └── test_object_detection.py
-└── data/
-    └── project.db                # Çalışınca oluşur, Git'e eklenmez
-```
+Ardından:
 
----
+python -m pytest tests/test_object_detection.py -v
 
-## Veritabanı
+YOLO modülü için iki otomatik test uygulanmıştır:
 
-Veritabanı SQLite ile tutulur. Tüm erişim `src/data/database.py` üzerinden yapılır;
-diğer modüller doğrudan SQL yazmaz.
+Geçerli bir görüntüden nesne tespit sonuçlarının döndürülmesi.
+
+Görüntü bulunamadığında uygun hatanın oluşturulması.
+
+Son test çalıştırmasında iki test de başarılı olmuştur.
+
+## Veritabanı Katmanı
+
+Uygulamanın tüm verisi SQLite ile `data/project.db` dosyasında tutulur.
+Kayıtlı kişiler, yapılan analizler ve bu analizlerde bulunan yüz ve nesne sonuçları burada saklanır.
+Diğer modüller veritabanına doğrudan SQL yazmaz; tüm işlemler `database.py` içindeki fonksiyonlarla yapılır.
+
+### Tablolar
 
 ```mermaid
 erDiagram
@@ -141,20 +96,20 @@ erDiagram
         int analysis_id FK
         int person_id FK "NULL = Bilinmeyen kişi"
         real confidence
-        int x
-        int y
-        int width
-        int height
+        int x1
+        int y1
+        int x2
+        int y2
     }
     object_results {
         int object_result_id PK
         int analysis_id FK
-        text object_name
+        text label
         real confidence
-        int x
-        int y
-        int width
-        int height
+        int x1
+        int y1
+        int x2
+        int y2
     }
 ```
 
@@ -163,155 +118,74 @@ erDiagram
 | `persons` | İzinli kayıtlı kişiler: ad, kayıt tarihi, aktif/pasif durumu |
 | `analyses` | Her analiz: görsel adı, analiz türü, durum ve varsa hata mesajı |
 | `face_results` | Bulunan yüzler: kutu konumu, güven skoru, eşleşen kişi |
-| `object_results` | Bulunan nesneler: sınıf adı, güven skoru, kutu konumu |
+| `object_results` | Bulunan nesneler: etiket (`label`), güven skoru, kutu konumu |
 
-**Kurallar**
+### Kutu koordinatları
 
-- Bir analiz silinince ona ait tüm yüz ve nesne sonuçları da silinir (`ON DELETE CASCADE`).
-- Bir kişi silinince eski yüz sonuçları korunur ve "Bilinmeyen kişi" olarak görünür (`ON DELETE SET NULL`).
-- Güven skorları 0 ile 1 arasında, kutu değerleri negatif olmayan tam sayılar olmalıdır.
-- Bir analiz ve sonuçları tek işlemde (transaction) kaydedilir; hata olursa hiçbiri kaydedilmez.
+Yüz ve nesne kutuları, YOLO modülüyle aynı şekilde `x1, y1, x2, y2` olarak saklanır:
+`(x1, y1)` kutunun sol üst köşesi, `(x2, y2)` sağ alt köşesidir. Değerler piksel cinsindendir.
 
-**Başlıca fonksiyonlar**
-
-| Fonksiyon | Görevi |
-|---|---|
-| `initialize_database()` | Tabloları oluşturur |
-| `add_person()`, `list_persons()`, `set_person_active()`, `delete_person()` | Kişi yönetimi |
-| `save_analysis()` | Başarılı analizi tüm sonuçlarıyla kaydeder |
-| `save_failed_analysis()` | Başarısız analizi hata mesajıyla kaydeder |
-| `get_analysis_history()` | Geçmişi en yeniden eskiye, yüz/nesne sayılarıyla getirir |
-| `get_analysis_details()` | Tek bir analizin tüm sonuçlarını getirir |
-| `delete_analysis()` | Analizi ve sonuçlarını siler |
-
----
-
-## Modüller arası veri formatı
-
-Yüz ve nesne modülleri sonuçlarını aşağıdaki formatta **liste** olarak döndürür.
-Koordinatlar piksel cinsindendir; `(x, y)` kutunun sol üst köşesidir.
-
-**Yüz sonucu**
+`save_analysis()` sonuçları şu formatta bekler; kutu liste veya sözlük olarak verilebilir:
 
 ```python
-{
-    "person_id": 3,        # Eşleşme yoksa None → "Bilinmeyen kişi"
-    "confidence": 0.87,    # 0–1 arası; bilinmiyorsa None
-    "box": {"x": 10, "y": 20, "width": 50, "height": 60},
-}
-```
+# Nesne sonucu (detect_objects() çıktısıyla aynı alanlar)
+{"label": "bus", "confidence": 0.91, "box": [22, 231, 805, 756]}
 
-**Nesne sonucu**
-
-```python
-{
-    "object_name": "laptop",
-    "confidence": 0.95,    # 0–1 arası, zorunlu
-    "box": {"x": 10, "y": 20, "width": 50, "height": 60},
-}
+# Yüz sonucu (person_id None ise "Bilinmeyen kişi")
+{"person_id": 3, "confidence": 0.87, "box": {"x1": 10, "y1": 20, "x2": 60, "y2": 80}}
 ```
 
 Ondalıklı koordinatlar kayıt sırasında tam sayıya yuvarlanır.
 
----
+### Veri kuralları
 
-## Kurulum
+- Bir analiz silinince ona ait tüm yüz ve nesne sonuçları da silinir (`ON DELETE CASCADE`).
+- Bir kişi silinince eski yüz sonuçları korunur ve "Bilinmeyen kişi" olarak görünür (`ON DELETE SET NULL`).
+- Güven skorları 0 ile 1 arasında olmalıdır.
+- Kutu koordinatları negatif olamaz; `x2 ≥ x1` ve `y2 ≥ y1` olmalıdır.
+- Analiz türü yalnızca `face`, `object` veya `both` olabilir.
+- Bir analiz ve tüm sonuçları tek işlemde (transaction) kaydedilir. Sonuçlardan biri hatalıysa hiçbiri kaydedilmez.
+- Kayıt zamanları (`created_at`) UTC olarak tutulur.
 
-Gereksinimler: Python 3.10 veya üstü, Git.
+### Fonksiyonlar
 
-```powershell
-# 1. Depoyu klonlayın
-git clone https://github.com/KULLANICI_ADI/yms301-yuz-ve-nesne-tanima.git
-cd yms301-yuz-ve-nesne-tanima
+| Fonksiyon | Görevi |
+|---|---|
+| `initialize_database()` | Tablolar yoksa oluşturur |
+| `add_person(name)` | Kişi ekler, `person_id` döndürür |
+| `get_person(person_id)` | Kişiyi getirir, yoksa `None` |
+| `list_persons(only_active=True)` | Kişileri ada göre sıralı listeler |
+| `set_person_active(person_id, is_active)` | Kişiyi silmeden pasif/aktif yapar |
+| `delete_person(person_id)` | Kişiyi tamamen siler (izin geri çekildiğinde) |
+| `save_analysis(image_name, analysis_type, face_results, object_results)` | Başarılı analizi sonuçlarıyla kaydeder, `analysis_id` döndürür |
+| `save_failed_analysis(image_name, analysis_type, error_message)` | Başarısız analizi hata mesajıyla kaydeder |
+| `get_analysis_history(limit=50, analysis_type=None)` | Geçmişi en yeniden eskiye, yüz/nesne sayılarıyla getirir |
+| `get_analysis_details(analysis_id)` | Tek bir analizin tüm sonuçlarını getirir |
+| `delete_analysis(analysis_id)` | Analizi ve sonuçlarını siler |
 
-# 2. Sanal ortam oluşturup etkinleştirin
-python -m venv venv
-.\venv\Scripts\Activate.ps1        # Windows (PowerShell)
-# source venv/bin/activate         # macOS / Linux
+Hatalı girdilerde `ValueError`, SQLite kaynaklı hatalarda `DatabaseError` fırlatılır.
+Tüm işlemler `logging` ile loglanır.
 
-# 3. Paketleri yükleyin
-pip install -r requirements.txt
-
-# 4. Veritabanını oluşturun
-python -m src.data.database
-```
-
-> PowerShell `Activate.ps1` çalıştırmaya izin vermezse bir kez şunu çalıştırın:
-> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-
-Sanal ortam klasörü (`venv/`), veritabanı dosyası (`data/*.db`) ve büyük model dosyaları
-`.gitignore` ile depo dışında tutulur.
-
----
-
-## Çalıştırma
-
-```powershell
-streamlit run src/web/app.py
-```
-
-Tarayıcıda `http://localhost:8501` adresi açılır.
-
-> Web arayüzü geliştirme aşamasındadır (3. hafta itibarıyla eklenecek).
-
----
-
-## Testler
-
-Tüm testleri çalıştırmak için proje kök dizininde:
-
-```powershell
-pytest -v
-```
-
-Yalnızca tek bir modülün testleri:
+### Testler
 
 ```powershell
 pytest tests/test_database.py -v
 ```
 
-Veritabanı testleri her test için geçici bir veritabanı kullanır;
-gerçek `data/project.db` dosyası etkilenmez.
+Her test geçici bir veritabanı kullanır, gerçek `data/project.db` etkilenmez.
+30 test şunları kontrol eder:
 
-| Test dosyası | Kapsam | Durum |
-|---|---|---|
-| `tests/test_database.py` | Tablo kurulumu, kişi işlemleri, analiz kaydı, hatalı girdiler, geçmiş sorguları | 23 test ✅ |
-| `tests/test_face_recognition.py` | Yüz modülü | Hazırlanıyor |
-| `tests/test_object_detection.py` | Nesne modülü | Hazırlanıyor |
+- tabloların oluşması ve yabancı anahtarların açık olması,
+- kişi ekleme, listeleme, pasif yapma ve silme,
+- yüz ve nesne sonuçlarıyla analiz kaydı,
+- kutunun liste veya sözlük olarak verilebilmesi ve ondalıklı değerlerin yuvarlanması,
+- hatalı girdilerin reddedilmesi (geçersiz tür, skor, etiket, kutu),
+- hatalı kayıtta tüm işlemin geri alınması,
+- eski tablo yapısındaki veritabanının fark edilmesi,
+- geçmişin sırası, sayıları ve filtreleri,
+- analiz silinince sonuçların da silinmesi.
 
----
-
-## Ekran görüntüleri
-
-> Web arayüzü tamamlandığında eklenecektir.
-
-<!--
-Görselleri docs/images/ klasörüne koyup şu şekilde ekleyin:
-![Görsel yükleme ekranı](docs/images/yukleme.png)
-![Analiz sonucu](docs/images/sonuc.png)
-![Analiz geçmişi](docs/images/gecmis.png)
--->
-
----
-
-## Gizlilik ve etik
-
-- Yüz tanıma için **yalnızca izin alınmış** kişilerin örnekleri kullanılır.
-- Biyometrik veriler gereğinden fazla saklanmaz. Kişi izni geri çektiğinde
-  `delete_person()` ile kaydı tamamen silinir.
-- Veritabanı dosyası ve kişi görselleri GitHub deposuna **eklenmez**.
-
----
-
-## Proje takvimi
-
-| Hafta | 1. kişi: Yüz | 2. kişi: Nesne | 3. kişi: Web / Veri |
-|---|---|---|---|
-| 1 | Yüz yöntemi araştırması | YOLO araştırması | Mimari ve DB taslağı ✅ |
-| 2 | Yüz tespit prototipi | Nesne tespit prototipi | SQLite tabloları ve fonksiyonları ✅ |
-| 3 | Kişi eşleştirme | Sonuç formatı ve skorlar | Streamlit ilk ekranı |
-| 4 | Yüz modülü iyileştirme | Nesne modülü iyileştirme | Yükleme ve DB bağlantısı |
-| 5 | Yüz entegrasyonu | Nesne entegrasyonu | Ortak analiz akışı |
-| 6 | Yüz testleri, hatalar | Nesne testleri, hatalar | Geçmiş ve DB testleri |
-| 7 | Birim/entegrasyon testi | Birim/entegrasyon testi | Uçtan uca testler |
-| 8 | Yüz dokümantasyonu | Nesne dokümantasyonu | Kurulum/README kontrolü |
+## Proje Ekibi
+- Zeynep Cemre KELEŞ
+- Melike KAYA
+- Nazar DEMİR
