@@ -40,29 +40,37 @@ YOLO model dosyası yolo26n.pt, modülün beklediği şekilde proje ana klasör�
 
 Proje ana klasöründe aşağıdaki komutla nesne tespiti fonksiyonu çalıştırılabilir:
 
-python -c "from src.core.object_detection import detect_objects; print(detect_objects('bus.jpg'))"
+python -c "from src.core.object_detection import detect_objects; print(detect_objects('tests/assets/bus.jpg'))"
 
-bus.jpg yerine analiz edilecek görüntünün dosya yolu kullanılabilir.
+Görsel yolu yerine analiz edilecek herhangi bir görüntünün yolu kullanılabilir. İsteğe bağlı `min_confidence` parametresi (varsayılan 0.25) bu değerin altındaki tespitleri eler:
 
-Fonksiyon, her tespit için label, confidence ve box alanlarını içeren bir liste döndürür. Belirtilen görüntü bulunamazsa FileNotFoundError hatası oluşturur.
+detect_objects('tests/assets/bus.jpg', min_confidence=0.5)
+
+Fonksiyon, her tespit için label, confidence ve box alanlarını içeren bir liste döndürür.
+
+Hata durumları:
+
+- Görsel ya da model dosyası bulunamazsa `FileNotFoundError` oluşur.
+- Dosya geçerli bir görsel değilse (bozuk veya farklı türde dosya) `ValueError` oluşur.
+- `min_confidence` 0 ile 1 arasında değilse `ValueError` oluşur.
 
 ## Testler
 
-Otomatik testleri çalıştırmak için önce test aracını kurun:
-
-python -m pip install pytest
-
-Ardından:
+Test araçları requirements.txt ile birlikte kurulur. Testleri çalıştırmak için:
 
 python -m pytest tests/test_object_detection.py -v
 
-YOLO modülü için iki otomatik test uygulanmıştır:
+Testler depodaki `tests/assets/bus.jpg` görselini kullanır. Model dosyası (yolo26n.pt) proje ana klasöründe yoksa, modele ihtiyaç duyan testler hata vermek yerine atlanır (skipped).
 
-Geçerli bir görüntüden nesne tespit sonuçlarının döndürülmesi.
+YOLO modülü için uygulanan testler:
 
-Görüntü bulunamadığında uygun hatanın oluşturulması.
-
-Son test çalıştırmasında iki test de başarılı olmuştur.
+- Geçerli bir görüntüden doğru biçimde sonuç döndürülmesi
+- Test görselinde otobüs ve insan bulunması
+- Kutu koordinatlarının geçerli olması (x1 < x2, y1 < y2, negatif değer yok)
+- Güven eşiği yükseltildiğinde sonuçların filtrelenmesi
+- Görüntü bulunamadığında FileNotFoundError oluşması
+- Geçersiz güven eşiğinde ValueError oluşması
+- Bozuk / görsel olmayan dosyada ValueError oluşması
 
 ## Veritabanı Katmanı
 
@@ -97,20 +105,20 @@ erDiagram
         int analysis_id FK
         int person_id FK "NULL = Bilinmeyen kişi"
         real confidence
-        int x
-        int y
-        int width
-        int height
+        int x1
+        int y1
+        int x2
+        int y2
     }
     object_results {
         int object_result_id PK
         int analysis_id FK
-        text object_name
+        text label
         real confidence
-        int x
-        int y
-        int width
-        int height
+        int x1
+        int y1
+        int x2
+        int y2
     }
 ```
 
@@ -119,13 +127,31 @@ erDiagram
 | `persons` | İzinli kayıtlı kişiler: ad, kayıt tarihi, aktif/pasif durumu |
 | `analyses` | Her analiz: görsel adı, analiz türü, durum ve varsa hata mesajı |
 | `face_results` | Bulunan yüzler: kutu konumu, güven skoru, eşleşen kişi |
-| `object_results` | Bulunan nesneler: sınıf adı, güven skoru, kutu konumu |
+| `object_results` | Bulunan nesneler: etiket (`label`), güven skoru, kutu konumu |
+
+### Kutu koordinatları
+
+Yüz ve nesne kutuları, YOLO modülüyle aynı şekilde `x1, y1, x2, y2` olarak saklanır:
+`(x1, y1)` kutunun sol üst köşesi, `(x2, y2)` sağ alt köşesidir. Değerler piksel cinsindendir.
+
+`save_analysis()` sonuçları şu formatta bekler; kutu liste veya sözlük olarak verilebilir:
+
+```python
+# Nesne sonucu (detect_objects() çıktısıyla aynı alanlar)
+{"label": "bus", "confidence": 0.91, "box": [22, 231, 805, 756]}
+
+# Yüz sonucu (person_id None ise "Bilinmeyen kişi")
+{"person_id": 3, "confidence": 0.87, "box": {"x1": 10, "y1": 20, "x2": 60, "y2": 80}}
+```
+
+Ondalıklı koordinatlar kayıt sırasında tam sayıya yuvarlanır.
 
 ### Veri kuralları
 
 - Bir analiz silinince ona ait tüm yüz ve nesne sonuçları da silinir (`ON DELETE CASCADE`).
 - Bir kişi silinince eski yüz sonuçları korunur ve "Bilinmeyen kişi" olarak görünür (`ON DELETE SET NULL`).
-- Güven skorları 0 ile 1 arasında olmalıdır. Kutu değerleri negatif olamaz.
+- Güven skorları 0 ile 1 arasında olmalıdır.
+- Kutu koordinatları negatif olamaz; `x2 ≥ x1` ve `y2 ≥ y1` olmalıdır.
 - Analiz türü yalnızca `face`, `object` veya `both` olabilir.
 - Bir analiz ve tüm sonuçları tek işlemde (transaction) kaydedilir. Sonuçlardan biri hatalıysa hiçbiri kaydedilmez.
 - Kayıt zamanları (`created_at`) UTC olarak tutulur.
@@ -156,13 +182,15 @@ pytest tests/test_database.py -v
 ```
 
 Her test geçici bir veritabanı kullanır, gerçek `data/project.db` etkilenmez.
-23 test şunları kontrol eder:
+30 test şunları kontrol eder:
 
 - tabloların oluşması ve yabancı anahtarların açık olması,
 - kişi ekleme, listeleme, pasif yapma ve silme,
 - yüz ve nesne sonuçlarıyla analiz kaydı,
-- hatalı girdilerin reddedilmesi (geçersiz tür, skor, kutu),
+- kutunun liste veya sözlük olarak verilebilmesi ve ondalıklı değerlerin yuvarlanması,
+- hatalı girdilerin reddedilmesi (geçersiz tür, skor, etiket, kutu),
 - hatalı kayıtta tüm işlemin geri alınması,
+- eski tablo yapısındaki veritabanının fark edilmesi,
 - geçmişin sırası, sayıları ve filtreleri,
 - analiz silinince sonuçların da silinmesi.
 - 
@@ -193,60 +221,3 @@ Yalnızca izni alınmış kişilerin görselleri kullanılır. Test fotoğraflar
 - Zeynep Cemre KELEŞ
 - Melike KAYA
 - Nazar DEMİR
-
-
-Python ile görüntü işleme tabanlı yüz ve nesne tanıma sistemi
-
-## Teknolojiler
-Python 3.10+, Streamlit, OpenCV, YOLO, SQLite, pytest
-
-## Klasör yapısı
-```
-yms301-yuz-ve-nesne-tanima/
-├── main.py                      # Giriş noktası (yalnızca yönlendirme)
-├── src/
-│   ├── core/
-│   │   ├── face_recognition.py  # 1. kişi: yüz tespiti ve kişi eşleştirme
-│   │   └── object_detection.py  # 2. kişi: YOLO ile nesne tespiti
-│   ├── data/
-│   │   └── database.py          # 3. kişi: SQLite veritabanı katmanı
-│   └── web/
-│       └── app.py               # 3. kişi: Streamlit arayüzü
-├── tests/                       # pytest birim testleri
-└── data/                        # project.db burada oluşur (Git'e eklenmez)
-```
-
-## Veritabanı
-| Tablo | İçerik |
-|---|---|
-| `persons` | İzinli kayıtlı kişiler (ad, kayıt tarihi, aktif/pasif) |
-| `analyses` | Her analiz: görsel adı, tür (`face` / `object` / `both`), durum, hata mesajı |
-| `face_results` | Bulunan yüzler: kutu konumu, güven skoru, eşleşen kişi (yoksa "Bilinmeyen kişi") |
-| `object_results` | Bulunan nesneler: sınıf adı, güven skoru, kutu konumu |
-
-`face_results` ve `object_results` tabloları `analyses` tablosuna bağlıdır. Bir analiz silinince sonuçları da silinir.
-Bir kişi silinince eski yüz sonuçları "Bilinmeyen kişi" olarak kalır.
-
-### Modüller arası veri formatı
-Yüz modülünün döndürdüğü her sonuç:
-```python
-{"person_id": 3, "confidence": 0.87, "box": {"x": 10, "y": 20, "width": 50, "height": 60}}
-```
-Nesne modülünün döndürdüğü her sonuç:
-```python
-{"object_name": "laptop", "confidence": 0.95, "box": {"x": 10, "y": 20, "width": 50, "height": 60}}
-```
-
-## Kurulum
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m src.data.database      # veritabanını oluşturur
-```
-
-## Testler
-```powershell
-pytest -v
-```
-origin/master

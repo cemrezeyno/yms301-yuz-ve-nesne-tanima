@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class
@@ -223,9 +223,13 @@ __marimo__/
 *.onnx
 models/
 .venv/
+
+# Proje veritabani (kisi verisi icerir, repoya eklenmemeli)
+data/*.db
+
+# YOLO model dosyasi ve cikti klasoru
 yolo26n.pt
-bus.jpg
+# Kok klasordeki deneme gorseli (tests/assets/bus.jpg depoda kalmali)
+/bus.jpg
 __pycache__/
 runs/
-# Proje veritabanı (kişi verisi içerir, repoya eklenmemeli)
-data/*.db

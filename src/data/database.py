@@ -7,7 +7,7 @@ yazmak yerine bu dosyadaki fonksiyonları kullanmalıdır.
 
 import logging
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -24,13 +24,12 @@ class DatabaseError(Exception):
     """Veritabanı işlemleri sırasında oluşan hatalar için ortak istisna."""
 
 
-class BoundingBox(TypedDict):
-    """Görsel üzerindeki kutunun piksel cinsinden konumu."""
-
-    x: int
-    y: int
-    width: int
-    height: int
+# Kutu, sol üst (x1, y1) ve sağ alt (x2, y2) köşeleriyle verilir.
+# İki yazım da kabul edilir:
+#   [x1, y1, x2, y2]                              (liste / tuple)
+#   {"x1": .., "y1": .., "x2": .., "y2": ..}      (sözlük)
+BoxCoordinates = Sequence[float] | Mapping[str, float]
+BOX_KEYS: tuple[str, str, str, str] = ("x1", "y1", "x2", "y2")
 
 
 class FaceResult(TypedDict):
@@ -41,15 +40,15 @@ class FaceResult(TypedDict):
 
     person_id: int | None
     confidence: float | None
-    box: BoundingBox
+    box: BoxCoordinates
 
 
 class ObjectResult(TypedDict):
     """Nesne modülünden beklenen tek bir sonuç."""
 
-    object_name: str
+    label: str
     confidence: float
-    box: BoundingBox
+    box: BoxCoordinates
 
 
 SCHEMA_SQL = """
@@ -79,10 +78,11 @@ CREATE TABLE IF NOT EXISTS face_results (
     confidence REAL
         CHECK (confidence IS NULL OR
                (confidence >= 0 AND confidence <= 1)),
-    x INTEGER NOT NULL CHECK (x >= 0),
-    y INTEGER NOT NULL CHECK (y >= 0),
-    width INTEGER NOT NULL CHECK (width >= 0),
-    height INTEGER NOT NULL CHECK (height >= 0),
+    x1 INTEGER NOT NULL CHECK (x1 >= 0),
+    y1 INTEGER NOT NULL CHECK (y1 >= 0),
+    x2 INTEGER NOT NULL,
+    y2 INTEGER NOT NULL,
+    CHECK (x2 >= x1 AND y2 >= y1),
     FOREIGN KEY (analysis_id)
         REFERENCES analyses(analysis_id)
         ON DELETE CASCADE,
@@ -94,13 +94,14 @@ CREATE TABLE IF NOT EXISTS face_results (
 CREATE TABLE IF NOT EXISTS object_results (
     object_result_id INTEGER PRIMARY KEY AUTOINCREMENT,
     analysis_id INTEGER NOT NULL,
-    object_name TEXT NOT NULL,
+    label TEXT NOT NULL,
     confidence REAL NOT NULL
         CHECK (confidence >= 0 AND confidence <= 1),
-    x INTEGER NOT NULL CHECK (x >= 0),
-    y INTEGER NOT NULL CHECK (y >= 0),
-    width INTEGER NOT NULL CHECK (width >= 0),
-    height INTEGER NOT NULL CHECK (height >= 0),
+    x1 INTEGER NOT NULL CHECK (x1 >= 0),
+    y1 INTEGER NOT NULL CHECK (y1 >= 0),
+    x2 INTEGER NOT NULL,
+    y2 INTEGER NOT NULL,
+    CHECK (x2 >= x1 AND y2 >= y1),
     FOREIGN KEY (analysis_id)
         REFERENCES analyses(analysis_id)
         ON DELETE CASCADE
@@ -148,9 +149,23 @@ def get_connection(
 
 
 def initialize_database(db_path: Path = DATABASE_PATH) -> None:
-    """Tablolar yoksa oluşturur."""
+    """Tablolar yoksa oluşturur.
+
+    Eski şemayla (x, y, width, height) oluşturulmuş bir veritabanı
+    bulunursa anlaşılır bir hata verir.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_connection(db_path) as connection:
+        columns = {
+            row["name"] for row in connection.execute(
+                "PRAGMA table_info(object_results)"
+            )
+        }
+        if columns and "x1" not in columns:
+            raise DatabaseError(
+                f"{db_path} eski tablo yapısıyla oluşturulmuş. "
+                "Dosyayı silip uygulamayı yeniden çalıştırın."
+            )
         connection.executescript(SCHEMA_SQL)
     logger.info("Veritabanı hazır: %s", db_path)
 
@@ -177,17 +192,32 @@ def _validate_confidence(confidence: float | None, allow_none: bool) -> None:
         )
 
 
-def _box_values(box: BoundingBox) -> tuple[int, int, int, int]:
-    """Kutuyu doğrular ve (x, y, width, height) tamsayılarına çevirir."""
+def _box_values(box: BoxCoordinates) -> tuple[int, int, int, int]:
+    """Kutuyu doğrular ve (x1, y1, x2, y2) tamsayılarına çevirir.
+
+    Liste/tuple ([x1, y1, x2, y2]) veya sözlük ({"x1": .., ...}) kabul
+    eder. Ondalıklı değerler en yakın tam sayıya yuvarlanır.
+    """
     try:
-        values = tuple(
-            int(round(box[key])) for key in ("x", "y", "width", "height")
-        )
-    except (KeyError, TypeError) as error:
+        if isinstance(box, Mapping):
+            raw = [box[key] for key in BOX_KEYS]
+        elif isinstance(box, (str, bytes)):
+            raise TypeError("Kutu metin olamaz.")
+        else:
+            raw = list(box)
+        if len(raw) != 4:
+            raise ValueError("Kutu 4 değerden oluşmalı.")
+        x1, y1, x2, y2 = (int(round(float(value))) for value in raw)
+    except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"Geçersiz kutu verisi: {box}") from error
-    if any(value < 0 for value in values):
-        raise ValueError(f"Kutu değerleri negatif olamaz: {box}")
-    return values  # type: ignore[return-value]
+
+    if x1 < 0 or y1 < 0:
+        raise ValueError(f"Kutu koordinatları negatif olamaz: {box}")
+    if x2 < x1 or y2 < y1:
+        raise ValueError(
+            f"x2 >= x1 ve y2 >= y1 olmalı (sol üst, sağ alt): {box}"
+        )
+    return x1, y1, x2, y2
 
 
 # --------------------------------------------------------------------------
@@ -288,12 +318,12 @@ def save_analysis(
 
     object_rows = []
     for obj in object_results:
-        object_name = str(obj.get("object_name", "")).strip()
-        if not object_name:
-            raise ValueError("Nesne adı boş olamaz.")
+        label = str(obj.get("label", "")).strip()
+        if not label:
+            raise ValueError("Nesne etiketi (label) boş olamaz.")
         _validate_confidence(obj.get("confidence"), allow_none=False)
         object_rows.append(
-            (object_name, float(obj["confidence"]), *_box_values(obj["box"]))
+            (label, float(obj["confidence"]), *_box_values(obj["box"]))
         )
 
     with get_connection(db_path) as connection:
@@ -306,7 +336,7 @@ def save_analysis(
         connection.executemany(
             """
             INSERT INTO face_results
-                (analysis_id, person_id, confidence, x, y, width, height)
+                (analysis_id, person_id, confidence, x1, y1, x2, y2)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [(analysis_id, *row) for row in face_rows],
@@ -314,7 +344,7 @@ def save_analysis(
         connection.executemany(
             """
             INSERT INTO object_results
-                (analysis_id, object_name, confidence, x, y, width, height)
+                (analysis_id, label, confidence, x1, y1, x2, y2)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [(analysis_id, *row) for row in object_rows],
