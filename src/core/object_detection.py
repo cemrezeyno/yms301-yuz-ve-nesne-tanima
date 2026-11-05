@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
+import cv2
+import numpy as np
 from ultralytics import YOLO
 
 # Model dosyasının proje ana klasöründeki konumu
@@ -27,12 +28,20 @@ def get_model():
 
 
 def _check_image(image: Path) -> None:
-    """Dosyanın gerçekten açılabilen bir görsel olduğunu kontrol eder."""
+    """Dosyanın gerçekten açılabilen bir görsel olduğunu kontrol eder.
+
+    Kontrol OpenCV ile yapılır. Pillow kullanılmaz, çünkü Pillow dosyayı
+    tanımadığında Ultralytics ek paket (pi-heif) kurmaya çalışabiliyor.
+    Dosya önce bayt olarak okunur; böylece Türkçe karakterli
+    Windows yollarında da çalışır.
+    """
     try:
-        with Image.open(image) as img:
-            img.verify()
-    except (UnidentifiedImageError, OSError) as error:
-        raise ValueError(f"Görsel okunamadı veya bozuk: {image}") from error
+        data = np.fromfile(str(image), dtype=np.uint8)
+    except OSError as error:
+        raise ValueError(f"Görsel okunamadı: {image}") from error
+
+    if data.size == 0 or cv2.imdecode(data, cv2.IMREAD_COLOR) is None:
+        raise ValueError(f"Görsel okunamadı veya bozuk: {image}")
 
 
 def detect_objects(
