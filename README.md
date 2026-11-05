@@ -26,11 +26,13 @@ src/core/object_detection.py
 
 ## Kurulum
 
+Ekipte ortak sürüm olarak **Python 3.14** kullanılır. Farklı sürümlerde bağımlılıklar (PyTorch, Ultralytics) sorun çıkarabilir.
+
 Projeyi bilgisayarınıza indirdikten sonra proje ana klasöründe bir Python sanal ortamı oluşturun ve etkinleştirin.
 
 Windows PowerShell:
 
-py -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 
